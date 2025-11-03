@@ -1,0 +1,1050 @@
+---
+title: "Detecção de Fraudes em Transações com Cartão de Crédito: Uma Análise Comparativa entre Árvores de Decisão, Random Forest e SVM"
+author: "Lincon Souza Pacífico"
+date: 09/19/2025
+format: html
+lang: pt
+editor: visual
+---
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| result: 'hide'
+#| include: false
+
+#Importação das bibliotecas necessárias para a realização deste Projeto. 
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(caret)
+library(ggplot2)
+library(PRROC)
+library(class)
+library(sparklyr)
+library(knitr)
+library(kableExtra)
+library(viridis)
+```
+
+## Introdução.
+
+A crescente digitalização dos serviços financeiros trouxe inúmeros benefícios para a sociedade, mas também intensificou os riscos relacionados a crimes cibernéticos, em especial a fraude em transações com cartão de crédito. Esse tipo de fraude representa um desafio significativo para instituições financeiras, que precisam identificar padrões suspeitos em grandes volumes de dados de forma rápida e eficiente, reduzindo prejuízos financeiros e protegendo os consumidores.
+
+Nesse contexto, o uso de técnicas de aprendizado de máquina tem se mostrado uma estratégia promissora para a detecção automática de transações fraudulentas. Modelos preditivos são capazes de aprender a partir de padrões históricos de comportamento, classificando novas transações entre legítimas e fraudulentas com alto grau de precisão.
+
+O presente relatório tem como objetivo realizar uma análise comparativa entre três modelos de classificação: **Árvore de Decisão, Random Forest e SVM (Máquina de vetores de suporte).**
+
+A comparação entre os modelos busca avaliar não apenas a acurácia, mas também métricas mais adequadas a cenários de classes desbalanceadas, como **Precisão, Recall, F1-score, matriz de confusão e Área sob a curva ROC (AUC)**, de modo a identificar qual algoritmo apresenta melhor desempenho na tarefa de detecção de fraudes.
+
+### Relevância.
+
+A detecção de fraudes é um problema crítico para o setor financeiro, com impactos econômicos bilionários a cada ano. Um modelo eficiente pode reduzir custos operacionais, aumentar a segurança das transações e elevar a confiança dos consumidores no uso de meios digitais de pagamento. Além disso, o desafio do desbalanceamento de classes torna esse problema um excelente estudo de caso para a aplicação e avaliação de algoritmos de classificação supervisionada.
+
+### Objetivos.
+
+-   Desenvolver e comparar diferentes modelos de classificação supervisionada para a detecção de fraudes em cartões de crédito.
+
+-   Avaliar o desempenho dos modelos em um cenário de dados altamente desbalanceados.
+
+-   Identificar métricas que melhor representem a qualidade da classificação para esse tipo de problema.
+
+### Perguntas e Hipóteses.
+
+-   Hipótese principal: Algoritmos de ensemble, como o Random Forest, tendem a apresentar desempenho superior em relação a modelos mais simples (Árvore de Decisão) e lineares (SVM), especialmente em cenários desbalanceados.
+
+-   Pergunta 1: Qual modelo apresenta melhor equilíbrio entre alta detecção de fraudes (Recall) e baixo índice de falsos positivos (Precisão)?
+
+-   Pergunta 2: Quais os trade-offs entre desempenho, interpretabilidade e custo computacional dos modelos testados?
+
+## Descrição dos Dados.
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| result: 'hide'
+#| include: false
+
+card <- read_csv("C:/Users/Lincon/Desktop/Projeto Final Banco de Dados/creditcard.csv") #Utilizando o pacote readr para abrir o banco de dados, chamado de card.
+
+summary(card) #Resumo Estatístico das variáveis.
+
+nrow(card) #Informa quantidade de linhas no banco de dados.
+ncol(card) #Informa quantidade de colunas no banco de dados.
+names(card) #Informa o nome das colunas do banco de dados. 
+class(card$Class) #Verificar qual tipo de classe da variável respostas. 
+
+card$Class <- as.factor(card$Class)  #Transformar a variável Class (Variável Resposta) para factor.
+
+summary(card$Class)
+
+nao_fraude <- sum(card$Class == "0")
+fraude <- sum(card$Class == "1")
+
+total <- nao_fraude + fraude
+
+perc_fraude <- (fraude / total) * 100
+```
+
+O conjunto de dados utilizado contém transações realizadas por portadores de cartões de crédito europeus em setembro de 2013, com informações anonimizadas e altamente desbalanceadas entre transações legítimas e fraudulentas. Para tal, utilizou-se o conjunto de dados disponibilizado no Kaggle (Credit Card Fraud Detection Dataset) <https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud>. Ele possui 284.807 transações (linhas) e um total de 31 variáveis (colunas). Destas, 28 variáveis foram transformadas por meio de um processo de anonimização baseado em Análise de Componentes Principais (PCA), a fim de proteger a privacidade dos dados. Apenas duas variáveis não foram transformadas: Time e Amount. Além disso, há a variável de resposta Class, que assume o valor 1 em caso de fraude e 0 para transações legítimas.
+
+Trata-se de um conjunto de dados altamente desbalanceado, contendo apenas 492 transações fraudulentas em um total de 284.807, o que corresponde a aproximadamente 0,172% de todas as transações.
+
+## Metodologia e Modelagem Preditiva
+
+### Ambiente de Desenvolvimento e Recursos Computacionais
+
+Para a realização deste trabalho, foi utilizada a linguagem R e o software RStudio, juntamente com as principais bibliotecas necessárias para realizar as análises preditivas, sendo elas: rpart, randomForest, caret, PRROC, class e sparklyr.
+
+Na construção dos modelos, o conjunto de dados foi embaralhado para garantir a aleatoriedade, e, para fins de reprodutibilidade, utilizou-se a função `set.seed(0000)`. Em seguida, realizou-se a divisão dos dados em 80% para treino e 20% para teste.
+
+Um ponto importante a ser destacado é a utilização da biblioteca sparklyr para o treinamento do modelo Randon Forest e SVM com validação cruzada. O sparklyr é uma biblioteca que integra o R ao Apache Spark, que é uma plataforma de processamento distribuído de dados muito usada em Big Data, permitindo processar grandes volumes de dados de forma distribuída e eficiente. Essa integração foi necessária devido a limitações computacionais, pois, ao utilizar o sparklyr, foi possível reduzir significativamente o tempo de processamento e realizar as análises de forma mais escalável e robusta. Em resumo, o sparklyr torna possível realizar análises e modelagens preditivas em datasets maiores do que a memória local, acelerando o processamento e aumentando a eficiência computacional.
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| result: 'hide'
+#| include: false
+
+set.seed(0000) #Setando seed para meios reprodutivos.
+
+card_sample <- card[sample(nrow(card)),] #Realização de embaralhamento
+n <- round(nrow(card_sample)*0.8) #Separação de 80% dos dados para variável N e arrendedodamento. 
+
+treino <- card_sample[1:n,] #Setando 80% dos dados para variável treino, que será o nosso modelo para treinar os modelos.
+teste <- card_sample[-(1:n),] #Setando 20% dos dados para variável teste, que será o teste real do modelo após treinar os modelos. 
+
+```
+
+### Modelos de Classificação Utilizados
+
+#### Árvore de Decisão
+
+A Árvore de Decisão é um modelo de classificação que organiza os dados em uma estrutura hierárquica de nós de decisão, ramos e folhas. Cada nó representa uma condição baseada em uma variável de entrada, enquanto os ramos direcionam para possíveis resultados até chegar a uma folha, que corresponde à classe predita. Sua principal vantagem é a interpretabilidade, já que o modelo permite visualizar claramente o processo de tomada de decisão. Entretanto, árvores individuais podem sofrer de sobreajuste (overfitting), reduzindo sua capacidade de generalização.
+
+#### Random Forest
+
+O Random Forest é um método de aprendizado de conjunto (ensemble learning) que combina várias Árvores de Decisão independentes para gerar previsões mais robustas. O algoritmo constrói múltiplas árvores a partir de diferentes subconjuntos de dados e variáveis, e a decisão final é tomada por votação (classificação) ou média (regressão). Essa abordagem reduz o risco de sobreajuste presente em árvores individuais e geralmente oferece melhor desempenho em termos de precisão e estabilidade.
+
+#### Máquina de Vetores de Suporte
+
+A SVM é um algoritmo de classificação que busca encontrar o hiperplano que melhor separa as classes em um espaço de alta dimensão. O objetivo é maximizar a margem entre os pontos de classes diferentes mais próximos ao hiperplano, chamados de support vectors. A SVM pode ser estendida para problemas não lineares por meio do uso de funções kernel, que projetam os dados em dimensões superiores, permitindo a separação mesmo em cenários complexos. Sua principal vantagem é o bom desempenho em conjuntos de dados de alta dimensionalidade, embora possa demandar maior custo computacional.
+
+### Critérios de Validação e Métricas Utilizadas
+
+Para avaliar os modelos de classificação, foi aplicada a técnica de validação cruzada (cross-validation), que consiste em dividir o conjunto de dados em múltiplas partições, utilizando algumas para treino e outras para teste, de forma rotativa. Essa estratégia permite uma estimativa mais robusta do desempenho dos modelos, reduzindo a chance de resultados enviesados por uma única divisão dos dados.
+
+No entanto, a acurácia não foi utilizada como métrica principal neste trabalho, uma vez que o conjunto de dados apresenta forte desbalanceamento entre as classes (fraude x não fraude). Nesse cenário, a acurácia tende a ser inflada pelo grande número de instâncias da classe majoritária, podendo transmitir uma falsa impressão de desempenho.
+
+Dessa forma, optou-se pelo uso de métricas mais adequadas ao contexto de detecção de fraudes, focando especialmente na classe minoritária:
+
+-   Precisão (Precision): indica a proporção de instâncias classificadas como fraude que realmente são fraudes, sendo importante para reduzir falsos positivos.
+
+-   Recall (Sensibilidade): mede a proporção de fraudes corretamente identificadas, crucial para não deixar transações fraudulentas passarem despercebidas.
+
+-   F1-Score: média harmônica entre Precisão e Recall, equilibrando as duas métricas.
+
+-   Área sob a Curva de Precisão-Recall (AUPRC): é uma métrica usada para avaliar o desempenho de modelos de classificação, principalmente quando lidamos com conjuntos de dados desbalanceados (onde uma classe aparece muito mais que a outra, como em detecção de fraudes ou doenças raras).
+
+-   Matriz de confusão: utilizada para visualizar os acertos e erros de classificação em termos absolutos.
+
+# Resultados
+
+### Árvore de Decisão.
+
+No desenvolvimento desta etapa do trabalho, foi realizada a construção de uma árvore de decisão com parâmetros que permitem seu crescimento máximo. Dessa forma, a árvore gerada apresenta alta complexidade e grande profundidade. Em seguida, aplicou-se o processo de poda, que tem como objetivo simplificar o modelo e reduzir o risco de overfitting. Para isso, utilizou-se o critério de custo-complexidade (CP). Essa técnica permite selecionar o ponto em que o modelo apresenta o melhor equilíbrio entre complexidade e desempenho, minimizando o erro de validação cruzada e tornando a árvore mais eficiente e interpretável.
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| result: 'hide'
+#| include: false
+
+#Criação de uma arvore de decisão grande, sem poda inicial. 
+arvore_grande <- rpart(Class ~ .,
+                        data = treino,
+                        method = "class",
+                        control = rpart.control(minsplit = 1, minbucket = 1))
+```
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| result: 'hide'
+#| include: false
+
+#Plota a árvore de decisão criada. 
+rpart.plot(arvore_grande, extra = 101, type = 1)
+previsao <- predict(arvore_grande, newdata = teste, type = "class") #Realiza a previsão usando a arvore grande no conjunto de dados de teste.
+mean(previsao == teste$Class) #Calcula a acurácia do modelo. 
+
+
+cp <- arvore_grande$cptable #Extrai a tabela de complexidade (cptable) da árvore
+min_xerror <- which.min(cp[, "xerror"]) #Encontra o menor erro da validação cruazada.
+cp_otimo <- cp[min_xerror, "CP"] #Obtem o valor do CP.
+
+cp_otimo #Visualização do CP
+
+arvore_poda <- prune(arvore_grande, cp = cp_otimo) #poda a árvore usando o melhor CP. 
+
+importancia_vars <- arvore_poda$variable.importance #extraí a importância das variáveis do modelo podado. 
+
+#Cria um dataframe com as variáveis e suas respectivas importância
+df_importancia <- data.frame( 
+  Variavel = names(importancia_vars),
+  Importancia = importancia_vars
+)
+
+#Plota um gráfico de barras para visualizar a importância das variáveis. 
+barplot(importancia_vars, 
+        main = "Importância das Variáveis no Modelo de Árvore",
+        horiz = TRUE, 
+        las = 1,      
+        cex.names = 0.7)
+
+```
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+rpart.plot(arvore_poda, extra = 101) #Plota a árvore de decisão já podada. 
+```
+
+O gráfico representa uma árvore de decisão usada para classificação. Cada divisão corresponde a uma condição em uma variável (V), separando os dados em ramos até chegar às folhas, que indicam a classe prevista e a proporção de observações. Assim, é possível visualizar de forma clara como o modelo utiliza os atributos para tomar decisões e classificar os exemplos.
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| result: 'hide'
+#| include: false
+previsao_poda <- predict(arvore_poda, newdata = teste, type = "class") #Realiza a previsão no conjunto teste
+
+#Criação de uma matriz de confusão para avaliar o desempenho do modelo. 
+matriz_arvore <- confusionMatrix(
+  data = previsao_poda,
+  reference = teste$Class,
+  positive = "1"
+)
+
+acuracia_arvore <- matriz_arvore$overall["Accuracy"] #Extraí o valor da Acurácia Global para visualização. 
+
+matriz_arvore_plot <- matriz_arvore$table #Extra a tabela númerica da matriz de confusão para personalização.
+colnames(matriz_arvore_plot) <- c("Não Fraude (Original)", "Fraude (Original)") #Renomear as colunas
+rownames(matriz_arvore_plot) <- c("Não Fraude (Previsto)", "Fraude (Previsto)") #Renomear as linhas. 
+
+matriz_arvore_plot #Exibe a matriz com novos nomes (a intenção no momento é apenas visual sem que apareça no relatório)
+```
+
+A partir da aplicação do modelo de árvore de decisão, obteve-se uma AUPRC de `0.7183`.
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| result: 'hide'
+#| include: false
+#AUPRC
+previsoes.card.prob <- predict(arvore_poda, newdata = teste, type = "prob") #Faz novamente a previsão mas pedindo apenas as probabilidades de cada classe
+prob.fraude <- previsoes.card.prob[, 2] #Seleciono apenas a segunda coluna no qual contem probabilidade de ser "Fraude"
+
+#Caclula a curva PR, usando as probabilidades e os valores reais
+prob.resultado <- pr.curve(scores.class0 =  prob.fraude,
+                           weights.class0 = as.numeric(as.character(teste$Class)),
+                           curve = TRUE)
+
+
+dados_arvore <- as.data.frame(prob.resultado$curve) #Converte os pontos de curva (Recall, Precision, Threshold) em um data frame
+colnames(dados_arvore) <- c("Recall", "Precision", "Threshold") #Renomeia as colunas do novo data frame. 
+
+auc_arvore <- round(prob.resultado$auc.integral, 4) #extraí e arredonda o valor da Área sob a Curva (AUC)
+```
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+
+#Através do ggplot2 cria um gráfico da curva PR. 
+ggplot(dados_arvore, aes(x = Recall, y = Precision, color = Threshold)) +
+  geom_line(linewidth = 1.2) + #Desenha a curva da linha. 
+  labs( #Define os títulos e rótulos dos eixos. 
+    title = "Curva Precision-Recall do Modelo de Árvore de Decisão",
+    subtitle = paste("AUC =", auc_arvore),
+    x = "Recall",
+    y = "Precision",
+    color = "Probabilidade" 
+  ) +
+  scale_color_viridis(option = "mako") +  #Aplica a paleta de cores
+  theme_minimal()+ #usa o nome minimalista.
+  theme( #Centraliza o título e o subtítulo do gráfico. 
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5))
+```
+
+A Curva Precision-Recall do modelo de Árvore de Decisão apresenta um AUC de aproximadamente 0,718, o que indica um desempenho intermediário na detecção da classe positiva.
+
+O formato da curva mostra que o modelo atinge rapidamente uma precisão elevada (≈0,75–0,80) mesmo em valores baixos de recall. Isso significa que, logo nos primeiros limiares, as previsões positivas tendem a ser confiáveis, ainda que capturem poucos casos.
+
+À medida que o recall aumenta, a precisão mantém-se relativamente estável, próxima de 0,80, o que demonstra que a árvore consegue recuperar mais casos positivos sem grande perda de qualidade nas previsões. No entanto, ao ultrapassar a faixa de 0,75 de recall, observa-se uma queda brusca na precisão, indicando um aumento significativo de falsos positivos quando se tenta maximizar a recuperação da classe positiva.
+
+De maneira geral, a Árvore de Decisão apresenta um bom equilíbrio até níveis médios de recall, mas sua limitação estrutural gera perda de desempenho quando o objetivo é identificar a maioria dos casos positivos.
+
+A partir da aplicação do modelo de árvore de decisão a seguinte matriz de confusão:
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+
+#Cria uma tabela formatada e estilizada da matriz de confusão. 
+kable(matriz_arvore_plot, caption = "Matriz de Confusão - Modelo de Árvore de Decisão") |>
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE,
+                position = "center")
+```
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| result: 'hide'
+#| include: false
+names(matriz_arvore$byClass) #exibe os nomes de todas as métricas de avaliação que são calculadas por classe
+
+sensibilidade_arvore <- matriz_arvore$byClass["Sensitivity"] #Extrai o valor da sensibilidade
+precisao_arvore <- matriz_arvore$byClass["Pos Pred Value"] #extrai o valor da precisão
+f1_arvore <- matriz_arvore$byClass["F1"]  #Extrai o valor do F1-Score
+
+```
+
+O desempenho do modelo foi avaliado por meio de métricas-chave de classificação, considerando o contexto de detecção de fraudes em um cenário de classes desbalanceadas. Os principais resultados obtidos foram:
+
+-   Sensibilidade (Recall): 0,795
+
+O modelo conseguiu identificar corretamente cerca de 79,5% dos casos de fraude, demonstrando boa capacidade de detecção de eventos fraudulentos.
+
+-   Precisão (Precision): 0,904
+
+Aproximadamente 90,4% das transações classificadas como fraude pelo modelo eram, de fato, fraudulentas. Isso indica baixo índice de falsos positivos e alta confiabilidade nas previsões.
+
+-   F1-Score: 0,846
+
+A combinação entre sensibilidade e precisão resultou em um F1-Score de 0,846, evidenciando um equilíbrio sólido entre detecção e precisão das previsões.
+
+Além disso, a Área sob a Curva de Precisão-Recall (AUPRC) reforça a qualidade do modelo em um cenário de classes desbalanceadas, servindo como métrica global mais adequada do que a acurácia. Esses resultados demonstram que o modelo apresenta desempenho consistente e robusto na identificação de fraudes, sendo uma ferramenta confiável para aplicações práticas em que a detecção precisa de eventos fraudulentos é crítica.
+
+### Random Forest (Floresta Aleatória)
+
+Foi desenvolvido o algoritmo Random Forest, um método de aprendizado de conjunto que combina múltiplas árvores de decisão para aumentar a capacidade de generalização e melhorar a precisão dos resultados. O processo incorpora duas principais fontes de aleatoriedade:
+
+-   Cada árvore é treinada em uma subamostra do conjunto de dados, obtida por bootstrapping (amostragem com reposição).
+
+-   Em cada divisão de nó, considera-se apenas um subconjunto aleatório das variáveis preditoras (features).
+
+Essa estratégia garante que as árvores sejam menos correlacionadas entre si, reduzindo a variância do modelo final e diminuindo o risco de overfitting. A etapa de predição é realizada por meio da agregação dos resultados das árvores: votação majoritária nos problemas de classificação ou média das previsões em problemas de regressão. Dessa forma, o Random Forest se destaca como um modelo robusto, estável e de alta performance.
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| result: 'hide'
+#| include: false
+sc <- spark_connect(master = "local") #Iniciando conexão com Spark
+caminho_arquivo <- "C:/Users/Lincon/Desktop/Projeto Final Banco de Dados/creditcard.csv" #Caminho do arquivo.
+
+card_spark <- spark_read_csv(sc, name = "creditcard_tbl", path = caminho_arquivo) #Ler o arquivo CSV diretamente no Spark
+glimpse(card_spark) #Resumo da Estrutura do DataFrame
+
+
+particoes <- sdf_random_split(card_spark, training = 0.8, test = 0.2, seed = 0000) #Separando em dois conjuntos, 80% para treinamento e 20%, para teste, setando uma seed (0000) para meios reprodutivos. 
+
+treino_spark <- particoes$training #Atribuindo 80% dos dados para à variável treino_spark
+teste_spark <- particoes$test #Atribuindo 20% dos dados para à variável teste_spark
+
+features_cols <- setdiff(colnames(treino_spark), "Class") #Setando todas as variáveis preditoras e utilizando o setdiff para remover a coluna "Class" da lista de todas as colulas. 
+
+assembler <- ft_vector_assembler(sc, input_cols = features_cols, output_col = "features_raw") #Cria um VectorAssembler. É uma etapa de Pré-Processamento do Spark ML, cria-se uma combinação de várias colunas em uma única coluna de vetor. A grande maioria dos algoritmos de ML no spark esperam as variáveis no formato de vetor.
+
+scaler <- ft_standard_scaler(sc, input_col = "features_raw", output_col = "features", with_mean = TRUE, with_std = TRUE) #StanderScale irá padronizar as variáveis para que tenham média 0 e desvio padrão 1. Sendo um passo muito importante e necessário para realizar ML.
+rf <- ml_random_forest_classifier(sc, label_col = "Class", features_col = "features", seed = 0000) #Define que o ML que será usado, neste caso, Random Forest. 
+
+pipeline <- ml_pipeline(assembler, scaler, rf) #Cria um Pipeline de ML.
+
+#Definindo uma grade de parâmetro para ajuste do modelo. 
+grid <- list( 
+  random_forest = list(
+    num_trees = c(50, 150, 300, 400, 450, 500), #Testar com 50, 150, 300, 400, 450 e 500 árvores
+    max_depth = c(5, 10, 20, 25)  #T0estar com profundidade 5, 10, 20 e 25.
+  )
+) 
+
+
+evaluator <- ml_binary_classification_evaluator(sc, label_col = "Class", metric_name = "areaUnderPR") #Cria um avaliador para classificação binária. No qual será usado para medir a performace de cada modelo treinado durante a validação cruzada. Label_col é a coluna da verdade ("Class"). Metric_name é a métrica a ser usada, neste caso, areaUnderPR (Área sob a curva de Precisão-Recall) que é a métrica mais ideal para dados desbalanceados.
+
+
+#Configurando a Validação Cruzada para encontrar o melhor modelo.
+cv <- ml_cross_validator(
+  sc,
+  estimator = pipeline, #É o pipeline que será treinado e avaliado.
+  estimator_param_maps = grid, #É a grade de parâmetros a ser testado.
+  evaluator = evaluator, #Ferramenta de irá medir qual combinação de parâmetros é a melhor.
+  num_folds = 5, #Define o números de partições para a validação cruzada, neste caso 5folds. O conjunto será dividido em 5 partes, 4 serão usadas para treinar e 1 para validação e o processo se repete 5 vezes. 
+  seed = 0000
+)
+
+modelo_cv <- ml_fit(cv, treino_spark) #Executa o processo de validação cruzada, treinando múltiplos modelos do conjunto de treinamento (treino_spark)
+print(modelo_cv$avg_metrics_df) #Imprimir os resultados da validação cruzada. modelo_cv$avg_metrics_df mostra a performace média (AUP) para cada combinação de parâmetros testada. 
+
+previsao_teste <- ml_transform(modelo_cv, teste_spark) # Usa o melhor modelo encontrado pela validação cruzada para fazer a previsão no conjunto teste (teste_spark), sendo conjunto de dados que o modelo nunca viu antes. 
+
+resultado_final_previsao <- ml_evaluate(evaluator, previsao_teste) #Avalia a performace final do melhor modelo do conjunto de teste.
+
+print(paste("Area Under PR no conjunto de teste:", resultado_final_previsao)) #Imprime o resultado final da AUP. 
+
+```
+
+Inicialmente, a primeira Random Forest apresentou um desempenho de AUPR (Área sob a Curva de Precisão-Recall) igual a 0,8019 no conjunto de teste, avaliado por meio de validação cruzada. Após a identificação do melhor modelo, foi realizada a análise de importância das variáveis, permitindo destacar aquelas que mais contribuíram para o processo de decisão.
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| result: 'hide'
+#| include: false
+melhor_modelo <- ml_stage(modelo_cv$best_model, "random_forest") #ML_stage seleciona um estágio específico 
+
+importancia_features <- ml_feature_importances(melhor_modelo) #Calcula a importância de cada variável do melhor modelo. 
+
+tabela_importancia <- data.frame( #Cria um data frame para organizar os resultados. 
+  feature = features_cols,
+  importance = importancia_features
+)
+
+#Manipulação para ordenar as variáveis mais importantes para menos e selecionando as 15 primeiras (15 mais importantes).
+top_15_features <- tabela_importancia |>
+  arrange(desc(importance)) |>
+  head(15)
+
+print(top_15_features) #Imprimir as variáveis. 
+
+
+top_15_nomes <- top_15_features |> #Extrarir apenas os nomes.
+  pull(feature)
+
+
+assembler_top15 <- ft_vector_assembler(sc, input_cols = top_15_nomes, output_col = "features_raw") #Pré-Processamento do Spark, igual anteriormente mas neste caso apenas com 15 colunas mais importantes.
+pipeline_top15 <- ml_pipeline(assembler_top15, scaler, rf) #Defino um novo pipeline de ML
+
+#Um novo Processo de Validação Cruzada para encontrar o melhor modelo 
+cv_top15 <- ml_cross_validator(
+  sc,
+  estimator = pipeline_top15,  
+  estimator_param_maps = grid,
+  evaluator = evaluator,
+  num_folds = 5,
+  seed = 0000
+)
+
+
+modelo_cv_top15 <- ml_fit(cv_top15, treino_spark) #Executa o processo de validação rcuzada no conjunto de treinamento
+
+print(modelo_cv_top15$avg_metrics_df)#Imprime o data frame com as métricas medias do desempennho com o novo conjunto. 
+
+
+previsao_teste_top15 <- ml_transform(modelo_cv_top15$best_model, teste_spark) #Utiliza o melhor modelo encontrado da validação cruzada e realiza a previsão no conjunto teste. 
+
+resultado_final_previsao_top15 <- ml_evaluate(evaluator, previsao_teste_top15) #Avalia o desempenho final do melhor modelo no conjunto teste, utilizando como métrica a Area Under PR.
+
+print(paste("Area Under PR no conjunto de teste:", resultado_final_previsao_top15)) #Imprime o resultado final da AUP. 
+```
+
+Com base nessa análise, foi construído um novo modelo de Random Forest, desta vez utilizando apenas as 15 variáveis mais relevantes, em comparação às 30 variáveis originais. O resultado obtido foi um AUPR de 0.7976, o que representa uma redução de apenas 0,43% em relação ao modelo inicial.
+
+Apesar da pequena queda no desempenho, o modelo reduzido apresentou vantagens significativas em termos de eficiência computacional, com menor tempo de processamento e menor consumo de memória. Essa economia de recursos é especialmente relevante em cenários de grande volume de dados ou quando há necessidade de implantações em tempo real.
+
+Em resumo, o trade-off entre desempenho e eficiência computacional mostrou-se vantajoso: o modelo simplificado manteve um desempenho praticamente equivalente ao modelo completo, mas com maior agilidade no processamento. Isso demonstra que a seleção de variáveis pode ser uma estratégia eficaz para equilibrar precisão preditiva, interpretabilidade e custo computacional.
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| result: 'hide'
+#| include: false
+previsoes_rf_local <- sdf_collect(previsao_teste_top15) #Coleta os resultados da previsão do Spark para um dataframe local
+
+prob_fraude_rf <- sapply(previsoes_rf_local$probability, function(vetor_de_prob) {
+  return(vetor_de_prob[2]) #Pega o segundo elemento, P(classe=1)
+})
+
+#calcula os dados para a curva PR do modelo RF
+prob_resultado_rf <- pr.curve(
+  scores.class0 = prob_fraude_rf,                     #As probabilidades do RF
+  weights.class0 = as.numeric(as.character(previsoes_rf_local$Class)), #Os valores reais
+  curve = TRUE
+)
+
+dados_rf <- as.data.frame(prob_resultado_rf$curve) #Converte os dados da curva em data frame para ggplot
+colnames(dados_rf) <- c("Recall", "Precision", "Threshold") #renomeia as colunas.
+
+auc_rf <- round(prob_resultado_rf$auc.integral, 4) #Extrai e arredonda a AUC.
+```
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+
+#Plota a curva PR no modelo RF.
+ggplot(dados_rf, aes(x = Recall, y = Precision, color = Threshold)) +
+  geom_line(linewidth = 1.2) +
+  labs(
+    title = "Curva Precision-Recall do Modelo Random Forest",
+    subtitle = paste("AUC =", auc_rf),
+    x = "Recall",
+    y = "Precision",
+    color = "Probabilidade" 
+  ) +
+  scale_color_viridis(option = "viridis") + 
+  theme_minimal()+
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5))
+```
+
+A Curva Precision-Recall do modelo Random Forest apresenta um AUC de aproximadamente 0,7976, o que indica um bom desempenho geral do modelo na detecção da classe positiva, especialmente considerando o desbalanceamento de classes típico em cenários de fraude ou eventos raros.
+
+O comportamento da curva mostra que, para valores baixos e intermediários de recall (até cerca de 0,70–0,75), o modelo mantém alta precisão (próxima de 1,0). Isso significa que, quando o modelo classifica uma instância como positiva nesse intervalo, há grande probabilidade de que seja de fato um caso verdadeiro, ou seja, com baixo número de falsos positivos.
+
+Entretanto, a partir de um recall próximo de 0,75, a precisão começa a cair de forma acentuada. Isso indica que, ao tentar recuperar uma maior quantidade de casos positivos, o modelo passa a cometer mais erros, aumentando os falsos positivos. Essa queda abrupta é uma característica comum em problemas com classes desbalanceadas, em que o ganho em recall ocorre às custas de perda significativa em precisão.
+
+De forma geral, o modelo Random Forest apresenta uma boa relação entre precisão e recall, sendo eficiente para contextos em que é importante manter uma alta taxa de acerto nas previsões positivas, mesmo que isso implique em não capturar todos os casos.
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| result: 'hide'
+#| include: false
+
+#coleta as métricas médias da validação cruzada para o modelo treinado com todas às variáveis. 
+resultados_completos_df <- collect(modelo_cv$avg_metrics_df) |>
+  rename(AUP = areaUnderPR) |> 
+  mutate(Modelo = "Todas as Variáveis")
+
+#Faz o mesmo para modelo treinado apenas com 15 variáveis mais importantes. 
+resultados_top15_df <- collect(modelo_cv_top15$avg_metrics_df) |>
+  rename(AUP = areaUnderPR) |>
+  mutate(Modelo = "Top 15 Variáveis")
+
+
+resultados_combinados_df <- bind_rows(resultados_completos_df, resultados_top15_df) #Combina os dois data frame de resultados em uma única para facilitar a comparação
+```
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+
+#Plota um gráfico para comparar o desempenho dos dois modelos. 
+ggplot(resultados_combinados_df, aes(x = num_trees_1, y = AUP, color = as.factor(max_depth_1), group = max_depth_1)) +
+  geom_line(linewidth = 1.1) +
+  geom_point(size = 3) +
+  facet_wrap(~ Modelo) +
+  labs(
+    title = "Comparação de Desempenho: Floresta Aleatória",
+    subtitle = "AUP (Area Under PR) para Todas as Variáveis vs. Top 15 Variáveis",
+    x = "Número de Árvores (num_trees)",
+    y = "Area Under PR (AUP)",
+    color = "Profundidade (max_depth)" 
+  ) +
+  theme_minimal() +
+  scale_color_brewer(palette = "Set2") + 
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5))
+  
+```
+
+O gráfico apresenta a comparação de desempenho da Floresta Aleatória considerando o AUP (Área sob a curva Precision-Recall) em função do número de árvores (num_trees) e da profundidade máxima (max_depth), avaliando-se tanto o uso de todas as variáveis quanto apenas as 15 mais relevantes.
+
+De modo geral, observa-se que as profundidades 20 e 25 apresentam desempenhos praticamente idênticos, com valores de AUP consistentemente mais elevados em comparação às profundidades menores. Isso indica que, a partir de uma certa complexidade da árvore, aumentar a profundidade não traz ganhos adicionais relevantes no desempenho.
+
+Quando se utilizam todas as variáveis ou apenas as 15 variáveis mais importantes, o comportamento é bastante semelhante, sugerindo que a redução de variáveis não compromete significativamente a performance do modelo. Isso reforça a viabilidade de um modelo mais enxuto, mantendo a qualidade das previsões.
+
+Além disso, verifica-se que as profundidades 5 e 10 resultam em desempenhos inferiores, evidenciando que árvores muito rasas não conseguem capturar adequadamente os padrões dos dados. O melhor equilíbrio é obtido com profundidades 20 e 25, independentemente do número de árvores, embora pequenos picos de desempenho ocorram em determinados pontos (como em torno de 400 árvores).
+
+Assim, pode-se concluir que profundidades maiores (20 e 25) são mais adequadas para maximizar o AUP, enquanto a escolha entre utilizar todas as variáveis ou apenas as 15 principais depende mais da conveniência e custo computacional do que de diferenças significativas de desempenho.
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| result: 'hide'
+#| include: false
+
+#Coloca os dados para R e ordena os resultados em ordem decrescente e seleciona apenas a primeira linha. 
+melhores_parametros_top15 <- collect(modelo_cv_top15$avg_metrics_df) |>
+  arrange(desc(areaUnderPR)) |>
+  head(1)
+
+melhores_parametros_top15 #Exibe a tabela com os melhores parâmetros. 
+
+```
+
+Essa parametrização equilibra precisão, robustez e eficiência computacional, resultando em um modelo final estável, otimizado e adequado à tarefa de detecção de fraude, com desempenho sólido validado por cross-validation.
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| result: 'hide'
+#| include: false
+previsoes_locais_rf.matriz <- sdf_collect(previsao_teste_top15) #Coloca a previsão do Spark para um dataframe local
+
+previsoes_locais_rf.matriz$Class <- as.factor(previsoes_locais_rf.matriz$Class) #O Confusion Matrix existe que as colunas referências e previsão sejam factor. 
+previsoes_locais_rf.matriz$prediction <- as.factor(previsoes_locais_rf.matriz$prediction) #O Confusion Matrix existe que as colunas referências e previsão sejam factor. 
+
+#Cria o objeto completo da matriz de confusão do RF
+matriz_completa_rf <- confusionMatrix(
+  data = previsoes_locais_rf.matriz$prediction,
+  reference = previsoes_locais_rf.matriz$Class,
+  positive = "1")
+
+
+matriz_rf_plot <- matriz_completa_rf$table #Extrai a tabela numérica (2x2) da matriz de confusão.
+
+#Renomeia as colunas e linhas. 
+colnames(matriz_rf_plot) <- c("Não Fraude (Original)", "Fraude (Original)")
+rownames(matriz_rf_plot) <- c("Não Fraude (Previsto)", "Fraude (Previsto)")
+```
+
+A partir da aplicação do modelo da Randon Forest a seguinte matriz de confusão:
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+
+#Cria uma tabela através do Kable para visualização da matriz. 
+kable(matriz_rf_plot, caption = "Matriz de Confusão - Modelo Randon Forest") |>
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE,
+                position = "center")
+```
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| result: 'hide'
+#| include: false
+matriz_completa_rf$byClass #Exibe todas as métricas "por classe"
+
+sensibilidade.rf <- matriz_completa_rf$byClas["Sensitivity"] #Extrai o valor da sensbilidade
+previsao.rf <- matriz_completa_rf$byClas["Pos Pred Value"] #Extrai o valor da precisao
+f1.rf <- matriz_completa_rf$byClas["F1"] #extraio valor da F1. 
+```
+
+A avaliação do modelo Random Forest evidenciou os seguintes resultados:
+
+-   Sensibilidade (Recall): 0,722
+
+O modelo identificou corretamente cerca de 72,2% dos casos de fraude, mostrando boa capacidade de detecção, embora ainda haja fraudes não reconhecidas.
+
+-   Precisão (Precision): 0,933
+
+Aproximadamente 93,3% das transações classificadas como fraude pelo modelo eram realmente fraudulentas, o que indica uma taxa muito baixa de falsos positivos e alta confiabilidade nas previsões.
+
+-   F1-Score: 0,814
+
+A combinação entre sensibilidade e precisão resultou em um F1-Score de 0,814, representando um equilíbrio sólido entre a capacidade de detectar fraudes e a precisão nas classificações.
+
+O modelo Random Forest apresentou excelente precisão e um desempenho consistente, com destaque para a baixa incidência de falsos positivos. Embora a sensibilidade tenha sido menor em comparação à precisão, o modelo demonstrou robustez e confiabilidade na detecção de fraudes.
+
+### SVM (Máquinas de Vetores de Suporte)
+
+Foi desenvolvido um modelo de Máquina de Vetores de Suporte (SVM), técnica bastante utilizada em tarefas de classificação por sua capacidade de lidar com dados de alta dimensionalidade e margens de decisão complexas.
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| result: 'hide'
+#| include: false
+svm <- ml_linear_svc(sc, label_col = "Class", features_col = "features") #Define o algoritmo do modelo, neste caso o SVM
+pipeline_svm <- ml_pipeline(assembler, scaler, svm) #Cria um pipeline de ML que inclui as etapas anterior.
+
+
+grid_svm <- list( #Validação cruzada para encontrar os melhores parâmetros.
+  linear_svc = list(
+    reg_param = c(0.01, 0.1, 1.0), #Parâmetro de regularização. Um valor maior cria uma "avenida" (margem) mais larga, mas pode tolerar alguns erros (pontos do lado errado da rua). Ajuda a evitar overfitting.
+    max_iter = c(10, 20) #Número máximo de iterações que o algoritmo vai rodar para encontrar a melhor solução.
+  )
+)
+
+#Configura o objeto da vlidação curazada. 
+cv_svm <- ml_cross_validator(
+  sc,
+  estimator = pipeline_svm, #Pipeline a ser treinado e avaliado.
+  estimator_param_maps = grid_svm, #Grade de parâmetros a ser testada
+  evaluator = evaluator, #Métrica de avaliação
+  num_folds = 5, #Divide os dados de treino em 5 partes para validação.
+  seed = 1234 #Semente para garantir os resultados sejam reprodutiveis.
+)
+
+modelo_cv_svm <- ml_fit(cv_svm, treino_spark) #Executa o treinamento usando validação cruzada
+
+```
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| result: 'hide'
+#| include: false
+#AVISO PARA O EU: Após horas de execução do código me liguei que deveria realizar o svm com as melhores 15 variavéis que identifiquei através do randonforest que no caso seria mais rápido computacionalmente para ser realizado. Caso eu tenha tempo, irei fazer. 
+previsao_teste_svm <- ml_transform(modelo_cv_svm, teste_spark) #Usa o melhor modelo encontrado na validação cruazada. 
+
+
+resultado_final_svm <- ml_evaluate(evaluator, previsao_teste_svm) #Avalia o desempenho do modelo final no conjunto teste. 
+
+print(modelo_cv_svm$avg_metrics_df)
+
+```
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| result: 'hide'
+#| include: false
+print(paste("Area Under PR (SVM) no conjunto de teste:", resultado_final_svm))
+```
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| result: 'hide'
+#| include: false
+previsoes_locais_svm <- sdf_collect(previsao_teste_svm) #Coleta as previsão do Spark para dataframe local
+glimpse(previsoes_locais_svm) #Resumo da estrutura do dataframe
+ 
+#O SVM do Spark não gera probabilidade diretas, mas sim "RawPredicion" (Socre)
+score_fraude_svm <- sapply(previsoes_locais_svm$rawPrediction, function(raw_vetor) {
+  return(raw_vetor[2]) # Pega o score para a classe 1 (Fraude)
+})
+
+#Calcula a curva PR usando os score do SVM
+prob_resultado_svm <- pr.curve(
+  scores.class0 = score_fraude_svm, 
+  weights.class0 = as.numeric(as.character(previsoes_locais_svm$Class)), 
+  curve = TRUE
+)
+
+#Prepara os dados da curva para plotagem com ggplot
+dados_svm <- as.data.frame(prob_resultado_svm$curve)
+colnames(dados_svm) <- c("Recall", "Precision", "Threshold")
+auc_svm <- round(prob_resultado_svm$auc.integral, 4)
+```
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+
+#Plota a curva PR do modelo SVM
+ggplot(dados_svm, aes(x = Recall, y = Precision, color = Threshold)) +
+  geom_line(linewidth = 1.2) +
+  labs(
+    title = "Curva Precision-Recall do Modelo SVM",
+    subtitle = paste("AUC =", auc_svm),
+    x = "Recall",
+    y = "Precision",
+    color = "Score de Risco"
+  ) +
+  scale_color_viridis(option = "plasma") + 
+  theme_minimal()+
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5))
+```
+
+A Curva Precision-Recall do modelo SVM apresenta um AUC de 0,7026, o que indica um desempenho moderado na detecção da classe positiva.
+
+Observa-se que o modelo consegue manter alta precisão (próxima de 1,0) em valores baixos de recall (até cerca de 0,20). Isso significa que, quando o SVM classifica uma instância como positiva nesse intervalo, a chance de acerto é muito elevada, embora capture apenas uma fração pequena dos casos positivos.
+
+À medida que o recall aumenta além de 0,20–0,25, a precisão sofre oscilações e passa a se estabilizar em torno de valores mais moderados (≈0,75–0,80). Esse comportamento demonstra que o modelo consegue recuperar mais casos positivos sem comprometer tanto a qualidade das previsões, mas ainda assim não atinge a mesma consistência de outros classificadores mais robustos.
+
+A partir de um recall em torno de 0,75, verifica-se uma queda abrupta na precisão, indicando que o esforço para recuperar quase todos os casos positivos gera um aumento significativo de falsos positivos.
+
+Em resumo, o modelo SVM mostra-se adequado em cenários onde a prioridade é minimizar falsos positivos em detrimento de recuperar todos os casos positivos.
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| result: 'hide'
+#| include: false
+
+previsoes_locais_svm.matriz <- sdf_collect(previsao_teste_svm) #Coleta o resultado da previsão do SVM do Spark para Dataframe local
+previsoes_locais_svm.matriz$Class <- as.factor(previsoes_locais_svm.matriz$Class) #Converte para factor.
+previsoes_locais_svm.matriz$prediction <- as.factor(previsoes_locais_svm.matriz$prediction) #Converte para factor.
+
+#Cria a matriz de confusão.
+matriz_completa_svm <- confusionMatrix(
+  data = previsoes_locais_svm.matriz$prediction,
+  reference = previsoes_locais_svm.matriz$Class,
+  positive = "1")
+
+matriz_smv_plot <- matriz_completa_svm$table #Extrai a tabela numérica de 2x2. 
+
+#Renomeia as colunas e linhas. 
+colnames(matriz_smv_plot) <- c("Não Fraude (Original)", "Fraude (Original)")
+rownames(matriz_smv_plot) <- c("Não Fraude (Previsto)", "Fraude (Previsto)")
+```
+
+Com base na matriz de confusão do modelo SVM, foram derivadas as informações a seguir, essenciais para avaliar seu desempenho na classificação:
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+
+#Plota a tabela de confusão através do Kable. 
+kable(matriz_smv_plot, caption = "Matriz de Confusão - Modelo SVM") |>
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE,
+                position = "center")
+
+```
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| result: 'hide'
+#| include: false
+matriz_completa_svm$byClass #Exibe o conjunto ocmpleto de métricas de avaliação calculadas por classe. 
+
+sensibilidade.svm <- matriz_completa_svm$byClas["Sensitivity"] #Extrai a sensibilidade
+previsao.svm <- matriz_completa_svm$byClas["Pos Pred Value"] #Extra a precisão
+f1.svm <- matriz_completa_svm$byClas["F1"] #Extrai a F1
+```
+
+O desempenho do modelo foi avaliado com base em métricas-chave de classificação, considerando o contexto de detecção de fraudes. Os principais resultados obtidos foram:
+
+-   Sensibilidade (Recall): 0,687
+
+O modelo conseguiu identificar corretamente cerca de 68,7% dos casos de fraude, demonstrando uma capacidade razoável de detectar eventos fraudulentos, embora ainda haja espaço para melhorias na detecção de fraudes menos evidentes.
+
+-   Precisão (Precision): 0,878
+
+Aproximadamente 87,8% das transações classificadas como fraude pelo modelo eram, de fato, fraudulentas. Isso indica que o modelo cometeu relativamente poucos falsos positivos, assegurando confiabilidade nas previsões de fraude.
+
+-   F1-Score: 0,771
+
+A métrica F1-Score, que combina sensibilidade e precisão, atingiu 0,771, refletindo um equilíbrio satisfatório entre a capacidade de detectar fraudes e a precisão das previsões realizadas.
+
+O modelo apresenta desempenho consistente na identificação de fraudes, com boa precisão e um equilíbrio adequado entre detecção e confiabilidade das previsões.
+
+## Comparativo de Desempenho entre Modelos na Detecção de Fraudes
+
+Uma questão recorrente na comparação de modelos de aprendizado de máquina é: **qual é o melhor modelo?**. A resposta, entretanto, raramente é direta ou universal, pois depende dos objetivos e do contexto de aplicação. No caso específico de detecção de fraudes, a escolha do modelo deve considerar não apenas métricas globais de desempenho, mas também os impactos financeiros e operacionais de erros de classificação.
+
+Nesse cenário, destacam-se dois tipos de erros críticos:
+
+**Falso Positivo (FP): O modelo classifica uma transação legítima como fraude.**
+
+-   Consequência: A compra de um cliente honesto é bloqueada, ocasionando uma experiência negativa, necessidade de contato com o atendimento (SAC) e o risco de abandono do serviço. Apesar de prejudicial para a experiência do usuário, esse tipo de erro é geralmente reversível e contornável.
+
+**Falso Negativo (FN): O modelo classifica uma transação fraudulenta como legítima.**
+
+-   Consequência: A fraude é efetivamente realizada, gerando perda financeira direta para a empresa. Esse tipo de erro é mais grave, pois impacta o caixa da organização e pode comprometer a sustentabilidade do negócio.
+
+Dessa forma, a avaliação do desempenho deve ir além da AUPRC, considerando o peso relativo de cada tipo de erro.
+
+### Análise das Métricas.
+
+**Precisão (Precision)**
+
+-   Mede, dentre todas as transações classificadas como fraude pelo modelo, quantas realmente eram fraudes.
+
+-   Alta precisão reduz a ocorrência de falsos positivos.
+
+**Sensibilidade (Recall)**
+
+-   Mede, dentre todas as fraudes efetivamente ocorridas, quantas foram corretamente identificadas pelo modelo.
+
+-   Alta sensibilidade reduz a ocorrência de falsos negativos.
+
+### Análise Comparativa Frente a Frente
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| result: 'hide'
+#| include: false
+dados_arvore <- as.data.frame(prob.resultado$curve) #Pega os dados da curva PR da arvore e converte em dataframe
+colnames(dados_arvore) <- c("Recall", "Precision", "Threshold")
+dados_arvore <- dados_arvore |> 
+  mutate(Modelo = "Árvore de Decisão")
+
+dados_svm <- as.data.frame(prob_resultado_svm$curve) #Pega os dados da curva PR do svm e converte em dataframe
+colnames(dados_svm) <- c("Recall", "Precision", "Threshold")
+dados_svm <- dados_svm |> 
+  mutate(Modelo = "SVM")
+
+dados_rf <- as.data.frame(prob_resultado_rf$curve) #Pega os dados da curva PR do RF e converte em dataframe
+colnames(dados_rf) <- c("Recall", "Precision", "Threshold")
+dados_rf <- dados_rf |> 
+  mutate(Modelo = "Random Forest")
+
+dados_completos_plot <- bind_rows(dados_arvore, dados_svm, dados_rf) #Junta os três dataframes em um único só. 
+
+#extrai e arredonda os valores
+auc_arvore <- round(prob.resultado$auc.integral, 3) 
+auc_svm <- round(prob_resultado_svm$auc.integral, 3)
+auc_rf <- round(prob_resultado_rf$auc.integral, 3)
+
+```
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+
+#Plota um gráfico do ggplot2 para sobrepor as curvas de PR dos três modelos
+ggplot(dados_completos_plot, aes(x = Recall, y = Precision, color = Modelo)) +
+  geom_line(linewidth = 1.1) +
+  labs(
+    title = "Comparação das Curvas Precision-Recall",
+    subtitle = paste("AUCs: Random Forest =", auc_rf, "| Árvore =", auc_arvore, "| SVM =", auc_svm),
+    x = "Recall (Sensibilidade)",
+    y = "Precision (Precisão)",
+    color = "Modelos"
+  ) +
+  theme_minimal() +
+  scale_color_brewer(palette = "Set1") +
+  theme(legend.position = "bottom")+
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5))
+```
+
+O gráfico de "Comparação das Curvas Precision-Recall" é uma ferramenta diagnóstica que oferece uma visão detalhada do comportamento de cada modelo. Ele visualiza o trade-off entre a Precisão (a confiabilidade dos alertas de fraude) e a Sensibilidade/Recall (a capacidade de detectar todas as fraudes existentes). A análise da forma e da posição de cada curva revela insights importantes sobre o desempenho dos modelos.
+
+**Interpretação do Ponto de Partida das Curvas**
+
+O início da curva, no extremo esquerdo do gráfico (onde o Recall é próximo de zero), indica a precisão do modelo ao considerar apenas as predições com os scores mais altos — ou seja, os casos que o modelo considera como os mais prováveis de serem fraude.
+
+**Random Forest e SVM (Linhas Azul e Verde):**
+
+-   Ambos os modelos iniciam com uma precisão de 1.0. Isso demonstra uma alta capacidade de identificar corretamente os casos mais evidentes de fraude. As transações classificadas no topo de seu ranking de "suspeita" são, de fato, fraudulentas, indicando um alto nível de confiança e assertividade nas suas predições mais fortes.
+
+**Árvore de Decisão (Linha Vermelha):**
+
+-   Este modelo inicia com um nível de precisão inferior. Tal comportamento sugere que seu ranking de predições não é tão "puro" no topo; entre as transações que ele classifica como as mais suspeitas, já existem instâncias de transações legítimas (falsos positivos).
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+modelos_comparativo <- c("Árvore de Decisão", "Randon Forest", "SVM") #cria vetores par armazenar os nomes.
+
+#Cria vetores para armazear as métricas.
+auc_valores <- c(0.7183, 0.7976, 0.7026)
+sensibilidade_valores <- c(0.7951807, 0.7217391, 0.6869565)
+precisao_valores <- c(0.9041096, 0.9325843, 0.8777778)
+f1_valores <- c(0.8461538, 0.8137255, 0.7707317) 
+
+
+#combina os vetores em um único dataframe para criar uma tabela de resumo
+tabela_comparativa <- data.frame(
+  Modelo = modelos_comparativo,
+  AUC = auc_valores,
+  Sensibilidade = sensibilidade_valores,
+  Precisao = precisao_valores,
+  F1_score = f1_valores
+)
+
+#Combina os vetores em um único dataframe para criar uma tabela de resumo. 
+kable(tabela_comparativa, 
+      caption = "Tabela Comparativa de Desempenho dos Modelos", 
+      digits = 3)
+```
+
+A Tabela Comparativa de Desempenho resume os principais indicadores dos três modelos. Nota-se que, em termos de AUC, o Random Forest novamente se destaca (0,798), superando a Árvore de Decisão (0,718) e o SVM (0,703).
+
+Em relação à sensibilidade (recall), a Árvore de Decisão apresenta o melhor resultado (0,795), indicando maior capacidade de identificar corretamente os casos positivos. O Random Forest vem em seguida (0,722), enquanto o SVM mostra o menor valor (0,687).
+
+Quanto à precisão, o Random Forest é o mais eficaz (0,933), seguido pela Árvore de Decisão (0,904) e pelo SVM (0,878). Isso evidencia que o Random Forest reduz mais os falsos positivos em comparação aos demais.
+
+Na métrica F1-score, que combina precisão e recall, a Árvore de Decisão atinge o melhor equilíbrio (0,846), ligeiramente à frente do Random Forest (0,814) e do SVM (0,771).
+
+### Limitações do Estudo
+
+**Análise Estática e Features:**
+
+-   O estudo foi conduzido a partir de um conjunto de dados histórico e estático, representando apenas uma “fotografia” do passado. As variáveis utilizadas foram majoritariamente características primárias da transação, sem exploração de features comportamentais ou contextuais mais sofisticadas. Além disso, não foi avaliado o impacto da degradação de desempenho do modelo ao longo do tempo, fenômeno conhecido como concept drift.
+
+**Escopo e Interpretabilidade do Modelo:**
+
+-   A análise priorizou o desempenho do Random Forest, que apresentou bons resultados, mas possui baixa interpretabilidade por ser considerado um modelo black box. Isso dificulta a explicação de decisões individuais. Além disso, a comparação não incluiu algoritmos de destaque no estado da arte, como os modelos de Gradient Boosting (XGBoost, LightGBM, entre outros), que poderiam oferecer ganhos adicionais.
+
+**Métricas de Avaliação:**
+
+-   A avaliação concentrou-se em métricas estatísticas (AUPRC, Precisão, Recall), sem avançar para análises de custo-benefício ou simulações de impacto financeiro direto. Essa etapa é fundamental para traduzir os resultados em benefícios concretos para o negócio.
+
+### Direcionamentos para Trabalhos Futuros
+
+**Engenharia de Features Avançada:**
+
+-   Desenvolver variáveis derivadas do comportamento histórico e agregado dos usuários (por exemplo: gastos em janelas de tempo, frequência de uso por dispositivo), ampliando a capacidade preditiva do modelo.
+
+**Expansão da Modelagem:**
+
+-   Incluir algoritmos de Gradient Boosting na análise comparativa, buscando identificar possíveis ganhos em precisão e robustez.
+
+**Técnicas de Robustez e Simulação:**
+
+-   Avaliar estratégias de reamostragem, como o SMOTE, para lidar com o desbalanceamento das classes.
+
+-   Realizar testes em ambiente de shadow mode, possibilitando validar a performance e a estabilidade do modelo em tempo real, sem riscos à operação em produção.
+
+## Conclusões
+
+Este estudo teve como objetivo desenvolver e avaliar modelos de Machine Learning para a detecção de fraudes em transações de cartão de crédito, um problema marcado pelo forte desbalanceamento entre classes. A análise detalhada dos resultados possibilitou a extração de conclusões consistentes, com implicações práticas diretas.
+
+### Principais Achados
+
+O estudo confirmou que, em cenários de dados desbalanceados, a escolha da métrica de avaliação é tão determinante quanto a seleção do algoritmo. A métrica AUPRC (Área sob a Curva Precision-Recall) mostrou-se a mais apropriada para mensurar o desempenho real dos modelos, refletindo de forma precisa o equilíbrio entre a correta identificação de fraudes e a redução de falsos alarmes. Evidenciou-se ainda o trade-off entre Precisão, que influencia diretamente a experiência do cliente e a eficiência operacional, e Sensibilidade (Recall), fundamental para a prevenção de perdas financeiras.
+
+### Modelo que Apresentou Melhor Desempenho
+
+O modelo Random Forest destacou-se de forma consistente como o mais eficaz. Com AUPRC de 0.798, Sensibilidade de 0.722 e Precisão de 0.933, apresentou desempenho superior aos demais algoritmos avaliados. Esses resultados evidenciam não apenas sua robustez na discriminação de fraudes, mas também sua confiabilidade nas predições positivas, garantindo que os alertas gerados possuam alta probabilidade de corresponder a transações fraudulentas.
+
+### Implicações Práticas do Estudo
+
+A aplicação prática do modelo Random Forest traz ganhos expressivos, entre eles:
+
+-   Eficiência Operacional: a alta precisão reduz significativamente o número de falsos positivos, direcionando a equipe de análise para casos com maior potencial de fraude.
+
+-   Experiência do Cliente: a diminuição de alarmes falsos minimiza bloqueios indevidos, reduzindo atritos e aumentando a satisfação dos clientes.
+
+-   Segurança Proativa e Orientada por Dados: o modelo fornece uma solução quantitativa e automatizada para mitigar perdas financeiras, estabelecendo um novo patamar de performance para estratégias futuras de combate a fraudes.
+
+### Mensagem Central
+
+A principal conclusão deste trabalho é a demonstração de que é viável construir um sistema de detecção de fraudes eficiente e confiável a partir dos dados disponíveis. O modelo Random Forest oferece o equilíbrio ideal entre a maximização da detecção de fraudes e a minimização de impactos negativos para clientes legítimos. Este estudo não apenas valida uma solução técnica robusta, mas também estabelece um ponto de partida sólido para a implementação de estratégias de segurança mais inteligentes, eficazes e orientadas por dados.
